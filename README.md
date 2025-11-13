@@ -1,1 +1,4 @@
 # cloud-init
+
+Dependencies:
+  - taskfile

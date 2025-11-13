@@ -1,0 +1,51 @@
+version: '3'
+
+vars:
+  IMAGE_NAME: seed-maker
+  ARTIFACT_DIR: ISOs
+  ISO_NAME: seed.iso
+
+tasks:
+  # Build Docker image
+  build:
+    desc: Build the Docker image for the cloud-init seed generator
+    cmds:
+      - docker build -t {{.IMAGE_NAME}} .
+
+  # Generate the cloud-init ISO_NAME
+  generate:
+    desc: Generate the cloud-init ISO_NAME
+    deps: [build]
+    cmds: 
+      - | 
+        mkdir -p {{.ARTIFACT_DIR}}
+        docker run --rm \
+          -u $(id -u):$(id -g) \
+          -v $(pwd)/cloud-init:/data \
+          -v $(pwd)/{{.ARTIFACT_DIR}}:/artifact \
+          {{.IMAGE_NAME}}
+    sources:
+      - user-data
+      - meta-data
+    generates:
+      - "{{.ARTIFACT_DIR}}/{{.ISO_NAME}}"
+
+  test:
+    desc: Test generated ISO_NAME
+    deps: [generate]
+    cmds:
+      - |
+        virt-install --name cloud-init-002 --memory 4000 --noreboot \
+        --os-variant detect=on,name=ubuntunoble \
+        --disk=size=10,backing_store="/home/tekiroz/ISOs/ubuntu-test.img" \
+        --cdrom $(pwd)/ISOs/{{.ISO_NAME}} \
+        --boot hd,cdrom
+
+
+  # Clean generated artifacts and Docker image
+  clean:
+    desc: Remove generated ISO and clean up
+    cmds:
+      - docker image rm -f {{.IMAGE_NAME}} || true
+      - rm -rf {{.ARTIFACT_DIR}}
+      - virsh destroy cloud-init-002 || true

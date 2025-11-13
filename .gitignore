@@ -1,0 +1,18 @@
+# Ignore generated ISO files
+*.iso
+ISOs/
+
+# Ignore Docker build cache
+**/Dockerfile.*.swp
+**/.docker
+
+# Ignore Taskfile artifacts
+.task
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore editor backups
+*~
+*.swp
