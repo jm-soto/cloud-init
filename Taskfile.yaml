@@ -2,50 +2,84 @@ version: '3'
 
 vars:
   IMAGE_NAME: seed-maker
-  ARTIFACT_DIR: ISOs
-  ISO_NAME: seed.iso
+  SO_IMAGE_DIRECTORY: $(echo $HOME)/ISOs
+  SO_IMAGE_NAME: "ubuntu-24.04-server-cloudimg-amd64.img"
+  SEED_DIR: SEEDs
+  SEED_NAME: seed.iso
+  TEST_VM: cloud-init-test
 
 tasks:
   # Build Docker image
   build:
     desc: Build the Docker image for the cloud-init seed generator
+    preconditions:
+      - test -f Dockerfile
     cmds:
       - docker build -t {{.IMAGE_NAME}} .
 
-  # Generate the cloud-init ISO_NAME
+  # Generate the cloud-init SEED_NAME
   generate:
-    desc: Generate the cloud-init ISO_NAME
+    desc: Generate the cloud-init SEED_NAME
     deps: [build]
+    silent: true
     cmds: 
       - | 
-        mkdir -p {{.ARTIFACT_DIR}}
+        mkdir -p {{.SEED_DIR}}
         docker run --rm \
           -u $(id -u):$(id -g) \
           -v $(pwd)/cloud-init:/data \
-          -v $(pwd)/{{.ARTIFACT_DIR}}:/artifact \
+          -v $(pwd)/{{.SEED_DIR}}:/artifact \
           {{.IMAGE_NAME}}
     sources:
       - user-data
       - meta-data
+      - vendor-data
+      - network-config
     generates:
-      - "{{.ARTIFACT_DIR}}/{{.ISO_NAME}}"
+      - "{{.SEED_DIR}}/{{.SEED_NAME}}"
+    method: none
 
   test:
-    desc: Test generated ISO_NAME
-    deps: [generate]
+    desc: Test generated SEED_NAME
+    silent: true
+    preconditions:
+      - test -f {{.SEED_DIR}}/{{.SEED_NAME}}
     cmds:
       - |
-        virt-install --name cloud-init-002 --memory 4000 --noreboot \
-        --os-variant detect=on,name=ubuntunoble \
-        --disk=size=10,backing_store="/home/tekiroz/ISOs/ubuntu-test.img" \
-        --cdrom $(pwd)/ISOs/{{.ISO_NAME}} \
+        virt-install --name {{.TEST_VM}} \
+        --memory 4000 \
+        --noreboot \
+        --os-variant detect=on \
+        --disk=size=10,backing_store="{{.SO_IMAGE_DIRECTORY}}/{{.SO_IMAGE_NAME}}" \
+        --cdrom $(pwd)/{{.SEED_DIR}}/{{.SEED_NAME}} \
         --boot hd,cdrom
-
 
   # Clean generated artifacts and Docker image
   clean:
     desc: Remove generated ISO and clean up
+    summary: |
+      Genearete a VM using Ubuntu-24.04 Cloud Image and
+      the {{.SEED_NAME}} for testing purposes.
+    prompt:
+      - "Do you want to clean?"
+    silent: true
     cmds:
       - docker image rm -f {{.IMAGE_NAME}} || true
-      - rm -rf {{.ARTIFACT_DIR}}
-      - virsh destroy cloud-init-002 || true
+      - rm -rf {{.SEED_DIR}}
+      - |
+        STATE=$(virsh domstate "{{.TEST_VM}}")
+        echo "Current state: $STATE"
+
+        if [ "$STATE" = "running" ]; then
+          echo "Shutting down the VM..."
+          virsh shutdown "{{.TEST_VM}}"
+
+          echo "Waiting for the VM to power off..."
+          while [ "$(virsh domstate "{{.TEST_VM}}")" != "shut off" ]; do
+            sleep 2
+          done
+        fi
+
+        echo "VM is shut off. Deleting..."
+        virsh undefine "{{.TEST_VM}}" --remove-all-storage
+        echo "VM '{{.TEST_VM}}' deleted."
